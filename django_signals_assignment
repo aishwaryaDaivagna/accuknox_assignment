@@ -1,0 +1,95 @@
+#Django Signals
+
+#1. Django signals are executed synchronously by default. This means that when a signal is sent, the receiver functions are called immediately in the same 
+#thread that sent the signal, blocking further execution until the receivers complete their work.
+
+# Example for this is :
+
+# models.py
+from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+import time
+
+# A simple model
+class MyModel(models.Model):
+    name = models.CharField(max_length=100)
+
+# Signal receiver that simulates a long operation
+@receiver(post_save, sender=MyModel)
+def my_model_saved(sender, instance, created, **kwargs):
+    print(f'Saving instance: {instance.name}')
+    time.sleep(5)  # Simulates a long operation
+    print('Done processing signal.')
+
+# In your Django shell or views.py
+# Creating an instance of MyModel
+MyModel.objects.create(name='Test Instance')
+
+#"Instance created." is printed on the output only after the signal processing completes. This illustrates that the signal receiver runs synchronously, blocking further execution until it's done.
+
+#2. Yes, Django signals run in the same thread as the caller. This means that when a signal is sent, any connected receiver functions are executed in the same thread that initiated the signal.
+
+#Example for this is: Firstly we have to set up django and create a signal and receiver. 
+
+# models.py
+from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+import threading
+
+class MyModel(models.Model):
+    name = models.CharField(max_length=100)
+
+@receiver(post_save, sender=MyModel)
+def my_model_saved(sender, instance, created, **kwargs):
+    # This function will print the current thread's name
+    print(f"Signal received in thread: {threading.current_thread().name}")
+
+## now we should trigger the instance 
+# In a Django shell or views.py
+from myapp.models import MyModel
+
+# Save an instance of MyModel
+my_instance = MyModel(name="Test")
+my_instance.save()
+
+#When we run this, output will be indicating that the signal was received in the same thread that executed the save operation
+#This confirms that the signal handler is executed in the same thread as the caller.
+
+#3. Django signals do not run in the same database transaction as the caller. Signals are executed after the transaction is committed, unless explicitly wrapped in a transaction.
+#Example snippet is :
+
+# models.py
+from django.db import models
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.db import transaction
+
+class MyModel(models.Model):
+    name = models.CharField(max_length=100)
+
+# This flag will be used to check if the transaction is committed
+transaction_committed = False
+
+@receiver(post_save, sender=MyModel)
+def my_model_saved(sender, instance, created, **kwargs):
+    global transaction_committed
+    transaction_committed = transaction.get_connection().in_atomic_block
+
+#Now, let's trigger the signal in a transaction:
+
+# In a Django shell or views.py
+from myapp.models import MyModel
+from django.db import transaction
+
+# Wrap the save operation in a transaction
+with transaction.atomic():
+    my_instance = MyModel(name="Test")
+    my_instance.save()
+
+# Check if the transaction was committed or still in a block
+print(f"Transaction committed: {transaction_committed}")
+
+#When you run this code, the output will show: Transaction committed: False
+This indicates that the signal was executed while still within the transaction block.
